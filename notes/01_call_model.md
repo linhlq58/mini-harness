@@ -111,3 +111,24 @@ System là kênh **tin cậy** đặt luật cho model. Nếu người dùng ghi
   - **Timeout và temperature cấu hình được** (`OPSDESK_LLM_TIMEOUT_S`, mặc định 30 giây): một lời gọi treo không được làm treo cả request của người dùng (file 26).
   - **Settings có kiểm tra** (pydantic-settings): thiếu key thì báo lỗi ngay lúc khởi động, thay vì đợi tới lần gọi đầu tiên mới hỏng.
   - **Ghi lại `usage`** vào trace và ledger chi phí (M07, M16), thay vì chỉ `print`.
+
+## Hỏi thêm
+
+**H: Không thấy chỗ nào truyền API key mà sao vẫn chạy được?**
+
+Key được truyền **qua biến môi trường**, không qua tham số. Đường đi gồm 3 chặng:
+
+1. `common.py`: `load_dotenv()` đọc file `.env` rồi chép từng dòng `TÊN=giá_trị` vào `os.environ` (các biến môi trường của tiến trình Python đang chạy). File 01 `import common` nên dòng này chạy trước mọi thứ.
+2. `ChatOpenAI(model=...)`: khi không ai truyền `api_key=`, LangChain tự tìm `os.environ["OPENAI_API_KEY"]`.
+3. Bên dưới LangChain là thư viện `openai`. Khi không ai truyền `base_url=`, nó tự tìm `os.environ["OPENAI_BASE_URL"]`. Nhờ vậy request đi tới gateway của khóa học chứ không tới api.openai.com.
+
+Kiểm tra thật (không in giá trị key):
+```
+Trước load_dotenv: OPENAI_API_KEY có trong env? False
+Sau load_dotenv:   OPENAI_API_KEY có trong env? True
+ChatOpenAI tự lấy key?      True
+openai_api_base trong LangChain: None           ← LangChain không giữ base_url...
+base_url client openai dùng thật == .env? True  ← ...thư viện openai tự đọc từ env
+```
+
+**Vì sao làm vậy:** secret không bao giờ nằm trong code, nên commit code không làm lộ key (`.env` đã nằm trong `.gitignore`). Đổi gateway hay đổi key chỉ cần sửa `.env`. Cái giá: phép màu này "vô hình". Quên `load_dotenv()` là gặp lỗi `Missing credentials`, đúng lỗi bạn thấy ở lần chạy đầu khi chưa có `.env`. OpsDesk làm tường minh hơn: pydantic-settings đọc `.env` thành một object có kiểm tra, rồi truyền `api_key`/`base_url` rõ ràng vào client.
