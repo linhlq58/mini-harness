@@ -1,10 +1,12 @@
 # File dùng chung duy nhất: tạo model + dữ liệu mẫu tí hon (IT Helpdesk).
 import os
+import sys
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 load_dotenv()  # đọc OPENAI_BASE_URL, OPENAI_API_KEY, MODEL từ .env
+sys.stdout.reconfigure(encoding="utf-8")  # để terminal Windows in được tiếng Việt
 
 EMPLOYEES = {
     "an": {"role": "employee", "dept": "sales"},
