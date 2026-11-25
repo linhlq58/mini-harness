@@ -131,3 +131,43 @@ Vì `ToolMessage` là câu trả lời cho một đề xuất cụ thể (`tool_
   - **Mọi tool trả về envelope** `ok | not_found | denied | error` và **không bao giờ để exception lọt ra** (file 06), vì phá thử C cho thấy một exception là sập cả request.
   - **Tool nhận `RequestContext` tin cậy** để biết ai đang hỏi (file 05), và **kiểm tra quyền sở hữu** ticket trước khi trả dữ liệu (file 06). Bản ở đây ai hỏi T-2 cũng xem được, điều không chấp nhận được trong production.
   - Mỗi bước "model xin tool / code chạy tool" thành một **event** (file 12) và một span trong **trace** (file 13), thay cho `print`.
+
+## Hỏi thêm
+
+**H: Giải thích kỹ hơn dòng 53.**
+
+```python
+messages.append(ToolMessage(json.dumps(result, ensure_ascii=False), tool_call_id=call["id"]))
+```
+Đọc từ trong ra ngoài, dòng này làm 4 việc:
+
+**① `json.dumps(result, ...)`: biến dict thành chuỗi chữ.**
+`result` là một `dict` Python, ví dụ `{'owner': 'an', 'status': 'open', ...}`. Model chỉ đọc được **chữ**, không đọc được object Python. `json.dumps` viết dict ra thành chuỗi JSON, một định dạng mà model đã gặp rất nhiều khi học.
+
+**② `ensure_ascii=False`: giữ nguyên tiếng Việt.** Output thật:
+```
+mặc định:           {"title": "Laptop ch\u1eadm", "note": "m\u00e1y ch\u1eadm"}
+ensure_ascii=False: {"title": "Laptop chậm", "note": "máy chậm"}
+```
+Mặc định, mọi ký tự có dấu bị đổi thành mã `\uXXXX`. Model vẫn hiểu được, nhưng chuỗi dài hơn (tốn token hơn), và người đọc log thì khó đọc.
+
+**③ `ToolMessage(..., tool_call_id=call["id"])`: bọc thành message vai "tool", kèm số phiếu.**
+Model gửi về mỗi đề xuất kèm một mã riêng:
+```
+đề xuất: {'name': 'get_ticket', 'args': {'ticket_id': 'T-1'}, 'id': 'call_rGqIsGXqMmiGa4HnPnJ9rCdT'}
+ToolMessage: type='tool', tool_call_id='call_rGqIsGXqMmiGa4HnPnJ9rCdT'
+```
+`tool_call_id` giống **số phiếu ở quầy gửi đồ**: model đưa phiếu số X, code trả đồ ghi đúng số X. Khi model xin nhiều tool một lúc (như câu "so sánh T-1 và T-2"), nhờ số phiếu mà model biết kết quả nào thuộc về lời gọi nào.
+
+**④ `messages.append(...)`: nối vào lịch sử để vòng sau gửi cho model.**
+Nhớ bài 01: model không có trí nhớ. Kết quả tool chỉ đến được model nếu nằm trong `messages` của lần `invoke` tiếp theo. Sau dòng 53, danh sách trông như sau:
+```
+[system] → [human] "Ticket T-1 sao rồi?" → [ai] xin get_ticket(T-1), phiếu X → [tool] phiếu X: {"status": "open", ...}
+```
+
+**Thử phá dòng 53, kết quả thật:**
+```
+tool_call_id SAI       -> LỖI 400: "No tool output found for function call call_rGqIsGXqMmiGa4HnPnJ9rCdT."
+QUÊN append ToolMessage -> LỖI 400: "No tool output found for function call call_rGqIsGXqMmiGa4HnPnJ9rCdT."
+```
+API **bắt buộc**: mỗi đề xuất tool của model phải có đúng một kết quả với cùng số phiếu, nếu không thì từ chối cả request. Đây là "hợp đồng" giữa code và API. `create_agent` ở file 04 sẽ lo phần này hộ bạn.
