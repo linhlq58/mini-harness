@@ -92,3 +92,43 @@ Không. `ask_knowledge` gọi `knowledge_agent.invoke(...)` mà không truyền 
   - **Subagent trả envelope** (`ok | empty | error`) kèm câu trả lời, không chỉ chuỗi chữ, để agent chính phân biệt "không có thông tin" với "subagent lỗi".
   - **Giới hạn riêng cho subagent** (recursion, timeout, ngân sách token), vì một agent con lặp mãi sẽ làm treo cả agent chính đang chờ nó.
   - **Event có namespace** (`main > knowledge > search_docs`, file 12, 20), để UI và trace vẫn thấy được agent con đã làm gì, dù agent chính không thấy. Cô lập context **cho model**, nhưng **không** che giấu khỏi người vận hành.
+
+## Hỏi thêm
+
+**H: So với router (08) thì khi nào nên dùng subagent?**
+
+Khác biệt cốt lõi là **ai quyết định gọi specialist nào, khi nào, mấy lần**: router thì **code**, subagent thì **model của agent chính**.
+
+**Thí nghiệm: câu hỏi có hai bước phụ thuộc nhau**: *"Vấn đề trong ticket T-1 của tôi thì chính sách công ty có cho đổi máy không?"* Phải biết T-1 nói về gì (laptop) thì mới biết tra chính sách nào.
+
+Router (08):
+```
+  [router] [('ticket', 'Vấn đề trong ticket T-1 của tôi là gì?'), ('knowledge', 'Chính sách công ty có cho phép đổi máy không?')]
+  [ticket] ... Ticket T-1 báo vấn đề **laptop chạy chậm**.
+  [knowledge] ... Mình chưa tìm thấy tài liệu chính sách về việc đổi máy. ...
+  trả lời: Ticket T-1 ghi nhận laptop chạy chậm. Mình chưa tìm thấy chính sách về đổi máy; ...
+```
+Router tách câu **trước khi** biết T-1 nói về laptop, rồi chạy hai nhánh **song song**. Nhánh knowledge không bao giờ biết đó là laptop, nên không tìm được tài liệu "Cấp laptop". **Trả lời thiếu.**
+
+Subagent (09), chạy 3 lần:
+```
+Lần 1: agent chính gọi get_ticket + ask_knowledge CÙNG LÚC (5 messages)
+       -> agent con không biết T-1 là gì, phải tự thử 3 lần search (8 messages nội bộ) mới ra "đổi máy sau 3 năm"
+Lần 2: ['human', 'ai', 'tool', 'ai', 'tool', 'ai']   ← get_ticket TRƯỚC, rồi mới ask_knowledge
+       [subagent] nhận: Theo chính sách công ty, ticket T-1 báo laptop chậm thì người dùng có được đổi máy không? ...
+       trả lời: Theo chính sách, laptop được đổi sau **3 năm**. Việc máy chậm chưa đủ căn cứ để đổi; ...
+Lần 3: (giống lần 2) [subagent] nhận: ... trường hợp laptop chậm có được đổi máy không? ...
+```
+Ở 2/3 lần, agent chính **xâu chuỗi**: đọc kết quả `get_ticket`, rồi đưa chi tiết "laptop chậm" vào câu hỏi cho agent con. Cả 3 lần đều trả lời đúng. Nhưng lần 1 cho thấy **model không phải lúc nào cũng chọn cách tối ưu**: nó gọi song song và tốn thêm vòng lặp ở agent con.
+
+**Bảng chọn:**
+
+| Chọn **router** khi | Chọn **subagent** khi |
+|---|---|
+| Các ý **độc lập** nhau, chạy song song được ("T-1 sao rồi, **và** mật khẩu là gì?") | Bước sau **cần kết quả** bước trước (như thí nghiệm trên) |
+| Tập specialist **cố định, ít**, phân loại rõ | Không biết trước cần gọi ai, mấy lần, theo thứ tự nào |
+| Cần **dự đoán được**: số lời gọi cố định (1 + N + 1), chi phí và độ trễ biết trước, dễ eval | Chấp nhận model tự quyết, đổi lại **linh hoạt** (lần 1 và lần 2 đi hai đường khác nhau) |
+| Cần **nhanh**: song song chủ động | Agent chính đang giữ một **hội thoại nhiều lượt** và chỉ thỉnh thoảng cần nhờ chuyên gia |
+| Muốn code kiểm soát luồng (dễ thêm guard, fallback, approval giữa các bước) | Muốn **cô lập context**: việc lộn xộn của chuyên gia không làm phình context của agent chính |
+
+**Quy tắc ngón tay cái** (giống đáp án câu tự kiểm tra của file 02): bắt đầu bằng **router** (ít tự chủ, dễ kiểm soát). Chỉ chuyển sang **subagent** khi gặp đúng loại câu hỏi mà router làm sai, tức các bước phụ thuộc nhau. Trong thực tế hai cách thường **kết hợp**: router ở ngoài cùng chọn nhánh, bên trong một nhánh là agent có subagent.
