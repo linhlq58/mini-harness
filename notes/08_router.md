@@ -150,3 +150,37 @@ Router là **workflow** (giống file 02, nhưng nhiều nhãn, có structured o
   - **Fallback có ghi event và trace** (lý do: router lỗi hay không có ý nào), để đo tỷ lệ fallback (M07). Bản ở đây chỉ `print`.
   - **Giới hạn số intent** (ví dụ tối đa 3), vì một câu hỏi bị tách thành 10 ý là 10 lần gọi specialist, chi phí nhân lên.
   - Về sau OpsDesk viết lại luồng này bằng **LangGraph `Send`** (file 21) để có checkpoint, streaming từng nhánh và namespace event.
+
+## Hỏi thêm
+
+**H: Giải thích dòng 56: `agent: Literal["ticket", "knowledge"]`.**
+
+**Đọc thành lời:** "trường `agent` là một chuỗi, nhưng **chỉ được** là đúng `"ticket"` hoặc đúng `"knowledge"`, không được là chuỗi nào khác."
+
+**Cú pháp:**
+- `agent: ...` trong class `BaseModel` là khai báo một **trường** và **kiểu** của nó (giống `question: str` ngay dưới).
+- `str` = "chuỗi bất kỳ". `Literal[...]` = "chỉ những giá trị **liệt kê đúng từng chữ** này". Kiểu này hẹp hơn `str` rất nhiều.
+- `Literal` lấy từ `typing` (dòng 7: `from typing import Literal`), là thư viện chuẩn của Python.
+
+**Một dòng này có tác dụng ở 3 chỗ** (chạy thử, không gọi model):
+
+1. **Schema gửi cho model:** Pydantic dịch `Literal` thành `enum`:
+   ```
+   Literal -> {'enum': ['ticket', 'knowledge'], 'type': 'string'}
+   str     -> {'type': 'string'}
+   ```
+   Gateway dùng schema này để **ép** đầu ra của model: model chỉ sinh được một trong hai giá trị trong `enum`. Đó là lý do phá thử B1 ("luôn đặt agent = billing") không có tác dụng.
+
+2. **Pydantic kiểm tra khi tạo object:** lớp bảo vệ thứ hai, phòng khi gateway không ép được:
+   ```
+   Literal, "ticket"  -> agent='ticket'
+   Literal, "billing" -> ValidationError: Input should be 'ticket' or 'knowledge'
+   str,     "billing" -> agent='billing'  (lọt qua!)
+   ```
+   Giá trị lạ bị chặn **ngay tại cửa**, ở dòng 83 (nằm trong `try`, nên rơi vào fallback), chứ không đi sâu vào tới `AGENTS[intent.agent]` ở dòng 71 rồi mới crash như phá thử B2.
+
+3. **Cho người đọc code:** nhìn dòng 56 là biết router chỉ có 2 lựa chọn, và chúng khớp với 2 key của `AGENTS` (dòng 47–52).
+
+**Lưu ý:** danh sách trong `Literal` và các key của `AGENTS` đang được viết **hai lần**. Thêm một specialist mới thì phải sửa cả hai chỗ. Nếu chỉ thêm vào `AGENTS` mà quên `Literal`, router sẽ không bao giờ chọn được specialist mới đó. Hệ thống không hỏng, nhưng cũng không ai báo lỗi. Hệ thống lớn thường sinh danh sách này từ một nguồn duy nhất.
+
+**So với file 02:** ở đó code tự làm việc này bằng tay (`label if label in LABELS else "other"`, sau khi `strip().lower()` chuỗi model trả về). `Literal` làm cùng việc đó, nhưng **sớm hơn** (ngay lúc model sinh chữ) và **chắc hơn** (ép bằng schema, không phải so chuỗi).
