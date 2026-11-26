@@ -116,3 +116,27 @@ Vì chat là **dữ liệu người dùng tự gõ**, ai cũng gõ được "tô
   - **Context chứa nhiều hơn**: `request_id` (để nối event, trace, audit), nhóm/scope (file 07), có khi cả ngân sách (file 28). Tất cả do server điền.
   - **Context được tạo đúng một chỗ** (middleware/dependency của API), và tầng agent **chỉ đọc**. Import-linter của OpsDesk cấm tầng agent tự tạo context, để không ai vô tình lấy danh tính từ chỗ khác.
   - **System prompt không chứa danh tính**, kể cả để "cá nhân hóa". Nếu cần cho model biết tên để xưng hô, OpsDesk coi đó là dữ liệu hiển thị, không bao giờ dùng để phân quyền.
+
+## Hỏi thêm
+
+**H: Lỗ hổng ở `get_ticket` là gì?**
+
+`an` hỏi về ticket của `chi`. Kết quả thật:
+```
+>>> [an đăng nhập] Ticket T-4 sao rồi?
+  model xin gọi get_ticket({'ticket_id': 'T-4'})
+  framework chạy tool -> {"owner": "chi", "status": "open", "title": "Máy in tầng 3 kẹt giấy"}
+  model trả lời: Ticket T-4 đang mở: máy in tầng 3 bị kẹt giấy. Người phụ trách là Chi.
+```
+`an` xem được ticket của `chi`, dù `RequestContext` đã biết rõ người hỏi là `an`. Lý do: file 05 có **hai** tool, và chỉ một tool đọc context.
+
+| Tool | Đọc `runtime.context`? | Hậu quả |
+|---|---|---|
+| `list_my_tickets()` | Có, lọc theo `ctx.user_id` | An toàn: chỉ trả ticket của mình |
+| `get_ticket(ticket_id)` | **Không**, tra thẳng `TICKETS[ticket_id]` | Ai biết mã ticket là xem được |
+
+Kiểu lỗi này có tên là **IDOR** (Insecure Direct Object Reference): hệ thống cho truy cập một đối tượng chỉ dựa vào **mã** của nó, mà không kiểm tra người hỏi có quyền với đối tượng đó không. Mã ticket thì dễ đoán (T-1, T-2, T-3, ...).
+
+Bài học của file 05: **có context chưa đủ**. Context chỉ là thông tin "ai đang hỏi". Mỗi tool phải tự **dùng** thông tin đó để kiểm tra. Prompt kiểu "đừng tiết lộ ticket người khác" cũng không cứu được: model không biết `owner` nghĩa là gì (file 03 cho thấy nó hiểu thành "người phụ trách"), và người dùng có thể thuyết phục model.
+
+File 06 vá bằng cách cho `get_ticket` nhận `runtime`, so `ticket["owner"] == ctx.user_id`, và trả `{"status": "denied", ...}` nếu không khớp.
