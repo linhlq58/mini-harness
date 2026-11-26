@@ -116,3 +116,39 @@ Tool đó sẽ **không có kiểm tra scope**, và không ai báo lỗi. Đây 
   - **Bộ tool của specialist khai báo ở một nơi** và có test khẳng định "agent knowledge không có tool ghi", để không ai vô tình thêm `close_ticket` vào nhầm agent.
   - **Thao tác ghi** (đóng ticket, cấp quyền) còn qua **approval gate và idempotency** (file 25), vì có scope chưa có nghĩa là được làm ngay mà không cần ai duyệt.
   - **Mỗi lần bị chặn vì scope** sinh event và audit (file 12, 27), để biết người dùng hay cố làm những gì vượt quyền.
+
+## Hỏi thêm
+
+**H: Giải thích dòng `if denied := missing_scope(runtime.context, "kb:read"): return denied` và cú pháp.**
+
+**Ý nghĩa:** "Hỏi `missing_scope` xem người này có thiếu scope `kb:read` không. Nếu thiếu thì trả ngay phiếu từ chối và dừng tool. Nếu đủ thì chạy tiếp."
+
+**Cú pháp: 3 mảnh ghép**
+
+1. **`missing_scope(...)` trả về một trong hai thứ:**
+   - `None` (nghĩa là "không thiếu gì", được phép),
+   - hoặc một envelope `{"status": "denied", ...}` (bị chặn).
+
+2. **`:=` (gọi là "walrus", vì trông như con hải mã nằm ngang) = gán và dùng giá trị ngay trong một biểu thức.** Nó làm hai việc cùng lúc: lưu kết quả vào biến `denied`, **và** đưa chính kết quả đó cho `if` kiểm tra. Khác với `=` thường: `=` không được phép đứng trong `if`.
+
+3. **`if` với một giá trị không phải True/False.** Python tự hỏi "giá trị này có 'trống' không?":
+   ```
+   bool(None) = False                      ← None tính là "trống"  -> if SAI
+   bool({"status": "denied"}) = True       ← dict có nội dung      -> if ĐÚNG
+   ```
+
+**Chạy thử (không gọi model):**
+```
+kb:read       -> denied = None                   -> if SAI  -> chạy tiếp phần thân tool
+ticket:close  -> denied = {'status': 'denied'}   -> if ĐÚNG -> return, tool dừng
+```
+
+**Viết dài ra, không dùng `:=`, nghĩa y hệt:**
+```python
+denied = missing_scope(runtime.context, "kb:read")
+if denied is not None:
+    return denied
+```
+Hai dòng gốc chỉ là cách viết gọn của ba dòng này. Dùng `:=` ở đây vì ba tool đều lặp lại đúng mẫu "kiểm tra rồi thoát sớm", nên viết gọn giúp phần kiểm tra quyền chiếm ít chỗ và nhìn là nhận ra ngay.
+
+**Vì sao `missing_scope` trả về envelope thay vì `True`/`False`:** khi bị chặn, tool cần trả cho model một kết quả có hình dạng chuẩn (bài 06). `missing_scope` làm sẵn envelope đó, nên tool chỉ việc `return denied`, không phải tự viết lại câu thông báo ở mỗi tool.
