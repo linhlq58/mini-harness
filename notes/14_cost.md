@@ -106,3 +106,37 @@ Mọi thay đổi đều phải đo lại **cả chi phí lẫn chất lượng*
   - **Phân biệt token cache** (`cache_read` trong `usage_metadata`): token đọc từ cache thường rẻ hơn nhiều, nên system prompt dài nhưng cố định có thể không đắt như tưởng.
   - **Budget guard trước khi gọi** (file 28): đo sau khi tiêu chỉ để báo cáo; chặn trước khi tiêu mới bảo vệ được ngân sách.
   - **Quyết định topology dựa trên eval + chi phí** (file 35, ADR), không theo cảm tính.
+
+## Hỏi thêm
+
+**H: Topology là gì?**
+
+**Topology = cách sắp xếp và nối các thành phần** (model, agent, tool) để trả lời một câu hỏi: có mấy agent, ai gọi ai, theo thứ tự nào, chạy lần lượt hay song song. Từ này vốn dùng trong mạng máy tính ("sơ đồ mạng"). Ở đây nó nghĩa là **sơ đồ đường đi của một câu hỏi** qua hệ thống.
+
+Ví dụ đời thường: cùng là "giao một bưu kiện", có thể giao **thẳng** từ kho tới nhà, hoặc qua **trạm trung chuyển** chia ra nhiều xe rồi gom lại. Món hàng giống nhau, **sơ đồ đường đi** khác nhau, nên tốn thời gian và tiền khác nhau.
+
+**Các topology đã gặp trong repo này:**
+
+```
+Agent đơn (03, 04)        người dùng → [agent ⟲ tool] → trả lời
+                          một agent tự lặp: gọi tool, đọc kết quả, gọi tiếp
+
+Workflow (02)             người dùng → [model phân loại] → code if/else → hàm xử lý → trả lời
+
+Router (08)               người dùng → [router] ─┬→ [specialist ticket]    ─┬→ [tổng hợp] → trả lời
+                                                 └→ [specialist knowledge] ─┘   (song song)
+
+Subagent (09)             người dùng → [agent chính ⟲] ──gọi như tool──→ [agent con ⟲]
+                                              ↑ chỉ nhận lại câu trả lời cuối ┘
+
+Handoff (10)              người dùng → [helpdesk] ──chuyển quyền──→ [security]
+                                       lượt sau: người dùng → [security] trực tiếp
+```
+
+**Vì sao topology quan trọng?** Cùng một câu hỏi, topology quyết định:
+- **Số lần gọi model**, tức **chi phí**. Bài 14: agent đơn 2 lần (43 VND), router 6 lần (90 VND).
+- **Độ trễ:** chạy song song hay lần lượt (bài 08: 5,8s so với 6,4s).
+- **Ai giữ quyền điều khiển:** code (workflow, router) hay model (agent, subagent). Bài 08, mục 6.
+- **Khả năng kiểm soát và dự đoán:** route cố định dễ test hơn vòng lặp tự do.
+
+Vì vậy "chọn topology" là một quyết định thiết kế có giá. File 35 sẽ tổng hợp thành bảng: loại việc nào hợp với topology nào.
