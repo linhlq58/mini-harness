@@ -5,6 +5,8 @@ description = "Học khái niệm agent harness, mỗi file một khái niệm"
 requires-python = ">=3.13"
 dependencies = [
     "langchain>=1.5.2",
+    "langchain-mcp-adapters>=0.3.2",
     "langchain-openai>=1.8.5",
+    "mcp>=1.30.0",
     "python-dotenv>=1.2.4",
 ]
